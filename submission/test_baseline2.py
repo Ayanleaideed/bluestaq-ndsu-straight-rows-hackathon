@@ -66,9 +66,11 @@ def score(detections, labels):
         tp = sum(r["hit"] for r in rows if r["cls"] == c)
         fn = sum(not r["hit"] for r in rows if r["cls"] == c)
         fp_list = [d for i, d in enumerate(dets) if d["class"] == c and i not in used]
-        if c == "MULTIPATH":   # short recurrent multipath is exempt unless it overlaps a representative
+        if c == "MULTIPATH":   # short recurrent multipath is exempt unless it overlaps a
+            # representative in time AND shares a tractor with it (same as the official scorer)
             fp_list = [d for d in fp_list if (d["e"] - d["s"]).total_seconds() > 180
-                       or any(d["s"] < l["e"] and d["e"] > l["s"] for l in reps)]
+                       or any(d["s"] < l["e"] and d["e"] > l["s"]
+                              and set(d["tractors"]) & set(l["tractors"]) for l in reps)]
         extras += fp_list
         f1s[c] = 2 * tp / (2 * tp + len(fp_list) + fn) if tp + fn + len(fp_list) else 0.0
     macro = sum(f1s.values()) / len(CLASSES)

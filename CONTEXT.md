@@ -232,13 +232,13 @@ Confidence is a heuristic, not a calibrated probability:
 |---|---|
 | May 4-5 vs the 12 labels | 12 of 12 matched. Start exact for 9; the three spoofs are 1, 1 and 4 minutes late. |
 | Non-multipath false alarms, May 4-5 | 0 |
-| Diagnostic (own implementation of the page-4 rules) | 37.5 / 40. Original baseline: 20.1 / 40. |
+| Diagnostic (own implementation, checked against the organizers' `score_submission.py`) | 40.0 / 40. Original baseline: 20.1 / 40. |
 | May 6 through `validate_submission.py` | OK, 493 detections (limit 500) |
 | Each threshold moved 25% down and up | 13 of 14 runs unchanged. `STORM_SIGNAL` at 30 drops to 9/12, because storm signal sits around 29-35. |
 
-The 2.5 lost points are multipath: every dip is reported per tractor, so the two other tractors'
-copies of the representative dip count as false alarms (multipath F1 0.5). Not reporting them
-would score multipath at zero.
+Multipath: every dip is reported per tractor. The other tractors' copies of the representative
+dip are exempt, because they share no tractor with the label (multipath F1 1.0). An earlier
+version of the tester counted them as false alarms and printed 37.5; see the resolved issue below.
 
 ### May 6 output
 
@@ -277,20 +277,22 @@ python submission/validate_submission.py submission.json
 An editor tab that is open on a notebook saves its old copy over changes made outside it. This
 overwrote `main.ipynb` and `approach.ipynb` once each today. Close the tab before the file is regenerated.
 
-### Open issue: why baseline 2 scores 37.5/40
+### Resolved issue: why the tester printed 37.5/40 (fixed November 14)
 
-Baseline 2 matches all 12 development episodes, but four extra multipath reports
-overlap the two scored representative windows: T1 and T2 at TRN-11, and T2 and T3
-at TRN-12. These count as false alarms under our implementation of the published
-rules. Other short recurrent multipath reports are exempt.
+The tester counted four multipath reports as false alarms: T1 and T2 at TRN-11, and
+T2 and T3 at TRN-12. This was a tester error, not a detector error.
 
-- Space weather, jamming, spoofing, and equipment fault each have F1 = 1.0.
-- Multipath has 2 true positives, 4 false positives, and 0 misses: F1 = 0.5.
-- Macro-F1 = (1 + 1 + 1 + 1 + 0.5) / 5 = 0.9; 25 x 0.9 = 22.5 points.
-- All 12 matched onsets are within five minutes: full onset credit = 15 points.
-- Total diagnostic = 22.5 + 15 = 37.5/40.
+- The organizers' scorer (`scoring/score_submission.py` in `Bluestaq/ndsu-hackathon-submissions`)
+  counts a short multipath report as a false alarm only if it overlaps a representative
+  in time and shares a tractor with it. The tester checked time only.
+- TRN-11 is labeled T3 and TRN-12 is labeled T1, so the four reports share no tractor
+  with the label and are exempt.
+- The tester now applies the same rule. Both the tester and the organizers' scorer give
+  baseline 2 40.0/40 on May 4-5 (and the original baseline 20.1/40).
 
-Review multipath reporting to reduce these false alarms without losing the
-representative matches. The test prints PASS despite these four false alarms;
-PASS does not mean a perfect score. This is a development result, not a confirmed
-score on the hidden May 6 labels or the overall 100-point judging rubric.
+Do not change multipath reporting in `baseline2.py` to chase this. Dropping other tractors'
+dips risks dropping the May 6 representative; merging tractors into one report gives tractor
+overlap 0.33, below the 0.50 needed to match.
+
+40/40 is a development result on the days the thresholds were chosen from. It is not a
+confirmed score on the hidden May 6 labels or the overall 100-point judging rubric.
