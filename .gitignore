@@ -3,3 +3,13 @@ data/
 __pycache__/
 .ipynb_checkpoints/
 .DS_Store
+
+# uv project files (dependencies are pinned in requirements.txt)
+pyproject.toml
+uv.lock
+.python-version
+main.py
+
+# local logs and tool settings
+debug.log
+.claude/
