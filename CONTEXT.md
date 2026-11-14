@@ -164,3 +164,133 @@ Not decided yet.
 - Judges: technical execution 30, decision quality 25, innovation 20, rigor 15, demo 10.
 - Automated diagnostic (supporting evidence only): 25 x macro-F1 over the five causes + 15 x onset credit. A match needs time overlap of at least 0.30 and tractor-set overlap of at least 0.50. Onset credit is full within 5 minutes of the true start and zero at 60 minutes.
 - Never put an email address or student ID in `submission.json`.
+
+## Changes on November 14 (morning)
+
+The "Where we stopped" section above is out of date; this section replaces it.
+
+### The approach
+
+A tractor has a problem when it looks different from what it should look like right now.
+"Should" comes from the other two tractors and from S4. There are five separate checks, so
+overlapping causes are reported as separate detections.
+
+### New files
+
+| File | What it is |
+|---|---|
+| `submission/baseline2.py` | The new detector (302 lines). Same command-line arguments as `baseline.py`. |
+| `submission/test_baseline2.py` | Tester: scores against the 12 labels, runs the official validator, moves thresholds. |
+| `notebooks/approach.ipynb` | The same approach step by step, with data exploration first, for judges. |
+
+`baseline.py` and `validate_submission.py` are unchanged. `submission.json` is still the old
+baseline output and must be regenerated with `baseline2.py`.
+
+### Functions in `baseline2.py`
+
+| Function | What it does | Why |
+|---|---|---|
+| constants at the top | Every threshold has a name (`JAM_DROP_DB = 4`, and so on). | No magic numbers; the tester can change them one at a time. |
+| `load(data)` | Reads telemetry, S4, Kp and interference reports. | The baseline read only telemetry and Kp. Loading once lets the tester reuse the data. |
+| `to_episodes(flag, max_gap, min_length)` | Joins flagged minutes into (start, end) episodes, bridges short gaps, drops short ones. | Replaces the baseline's merge loop with one reusable helper. |
+| `find_all(tele, s4)` | Builds per-minute tables (one column per tractor), then runs the five checks. Returns each detection with its measured values. | All the detection logic. Side-by-side columns make comparing tractors one line. |
+| `explain(d, kp, rfi, overlaps)` | Writes the evidence text and confidence for one detection. | The baseline's evidence was boilerplate and its confidence a fixed 0.5. The guide requires checkable measurements. |
+| `detect(data, start, end, frames)` | Keeps detections inside the window, clips their edges, notes overlapping causes, builds the output. | `start`/`end` let the tester run May 4-5 without editing the dates. |
+| `main()` | Command line; same arguments as `baseline.py`. | Unchanged usage. |
+
+### The five checks (inside `find_all`)
+
+| Check | Rule | What changed from `baseline.py` |
+|---|---|---|
+| Space weather | All three working tractors have signal below 40 at the same minute and S4 >= 0.2; at least 30 minutes. | Uses S4, not Kp (Kp drops while the storm goes on, which split the storm). Requires working tractors (removes the 07:00 parked false alarm). |
+| Jamming | Signal at least 4 dB below normal. Normal is the calm level (45), or the storm's own level during a storm. Lists only tractors that average a 4 dB drop. | Baseline called any weak signal with Kp < 5 jamming. Now it is found inside a storm (TRN-05), and the mildly hit tractor is left out (TRN-04). |
+| Spoofing | One tractor drifts more than 1 m beyond the fleet median while its signal is within 2 dB of the fleet's. The start is walked back to where drift first passed 0.15 m. | Baseline used raw drift, so storm drift hid TRN-08. Comparing with the other tractors cancels the shared drift. Walking back fixes the late start. |
+| Equipment fault | Only one tractor is bad: its weakest satellite is at least 8 dB below the fleet's (antenna), or its link is up less than 98% of the minute while the others' links are up. At least 10 minutes. | Baseline's `link < 0.7` sat at the fault's average and missed TRN-10. The fleet comparison is new. |
+| Multipath | Each pass through the north 40 m of the field where the weakest satellite drops at least 4 dB versus the minute before. Per second. | New; the baseline had no multipath rule. |
+
+Jamming minutes are excluded from the spoofing and equipment checks, so a jammer is not double-reported as those.
+
+### Evidence and confidence (`explain`)
+
+Each detection cites its time span, the measured values (signal drop per tractor, satellites,
+RTK_FIXED share, drift, link uptime), S4 and Kp, and any interference report from the start
+to 30 minutes after the end. It also names overlapping causes.
+
+Confidence is a heuristic, not a calibrated probability:
+
+| Cause | Confidence |
+|---|---|
+| Space weather | 0.9 (0.75 if the tractors' drops differ by 1.5 dB or more) |
+| Jamming | 0.85 with a matching interference report, otherwise 0.7 |
+| Spoofing | 0.8 |
+| Equipment fault | 0.8 |
+| Multipath | 0.6 |
+
+### Verified results (run by `test_baseline2.py`)
+
+| Test | Result |
+|---|---|
+| May 4-5 vs the 12 labels | 12 of 12 matched. Start exact for 9; the three spoofs are 1, 1 and 4 minutes late. |
+| Non-multipath false alarms, May 4-5 | 0 |
+| Diagnostic (own implementation of the page-4 rules) | 37.5 / 40. Original baseline: 20.1 / 40. |
+| May 6 through `validate_submission.py` | OK, 493 detections (limit 500) |
+| Each threshold moved 25% down and up | 13 of 14 runs unchanged. `STORM_SIGNAL` at 30 drops to 9/12, because storm signal sits around 29-35. |
+
+The 2.5 lost points are multipath: every dip is reported per tractor, so the two other tractors'
+copies of the representative dip count as false alarms (multipath F1 0.5). Not reporting them
+would score multipath at zero.
+
+### May 6 output
+
+| Time (Z) | Cause | Tractors | Confidence |
+|---|---|---|---|
+| 01:00-02:00 | Equipment fault (antenna) | T1 | 0.8 |
+| 02:12-02:54 | Jamming (RFI-003 matches) | T1, T2, T3 | 0.85 |
+| 13:00-16:00 | Space weather | T1, T2, T3 | 0.9 |
+| 16:31-17:12 | Spoofing | T1 | 0.8 |
+| 18:30-19:00 | Jamming (no report) | T1, T2, T3 | 0.7 |
+| 19:48-20:29 | Equipment fault (link) | T2 | 0.8 |
+| 21:49-22:24 | Spoofing | T3 | 0.8 |
+| all day | Multipath, 486 dips | each tractor | 0.6 |
+
+The README says May 6 has 8 episodes and the baseline finds 6. The likely 8 are the 7 above
+plus one multipath representative. The baseline's two misses are most likely the link fault and
+multipath. May 6 is unlabeled, so this is not confirmed.
+
+### Commands
+
+```bash
+python submission/test_baseline2.py --data data
+python submission/baseline2.py --data data --output submission.json --github-handle Ayanleaideed --repo-url https://github.com/Ayanleaideed/bluestaq-ndsu-straight-rows-hackathon
+python submission/validate_submission.py submission.json
+```
+
+### Still to do
+
+1. Regenerate `submission.json` with `baseline2.py` and validate it.
+2. Rewrite `README.md`: approach, reproduce commands, how labels were used, failure modes, limitations, extra data that would help.
+3. Commit and push, make the repository public, open the pull request to `Bluestaq/ndsu-hackathon-submissions`.
+4. Prepare the five-minute demo.
+
+### Notebook warning
+
+An editor tab that is open on a notebook saves its old copy over changes made outside it. This
+overwrote `main.ipynb` and `approach.ipynb` once each today. Close the tab before the file is regenerated.
+
+### Open issue: why baseline 2 scores 37.5/40
+
+Baseline 2 matches all 12 development episodes, but four extra multipath reports
+overlap the two scored representative windows: T1 and T2 at TRN-11, and T2 and T3
+at TRN-12. These count as false alarms under our implementation of the published
+rules. Other short recurrent multipath reports are exempt.
+
+- Space weather, jamming, spoofing, and equipment fault each have F1 = 1.0.
+- Multipath has 2 true positives, 4 false positives, and 0 misses: F1 = 0.5.
+- Macro-F1 = (1 + 1 + 1 + 1 + 0.5) / 5 = 0.9; 25 x 0.9 = 22.5 points.
+- All 12 matched onsets are within five minutes: full onset credit = 15 points.
+- Total diagnostic = 22.5 + 15 = 37.5/40.
+
+Review multipath reporting to reduce these false alarms without losing the
+representative matches. The test prints PASS despite these four false alarms;
+PASS does not mean a perfect score. This is a development result, not a confirmed
+score on the hidden May 6 labels or the overall 100-point judging rubric.
